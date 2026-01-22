@@ -121,6 +121,13 @@ impl App {
                 self.window_id = Some(id);
                 Task::none()
             }
+            Message::GtkTick => {
+                // Process pending GTK events for the tray icon
+                while gtk::events_pending() {
+                    gtk::main_iteration_do(false);
+                }
+                Task::none()
+            }
             Message::TrayEvent(tray_event) => match tray_event {
                 TrayEvent::ShowWindow => {
                     if let Some(id) = self.window_id {
@@ -142,13 +149,6 @@ impl App {
                     std::process::exit(0);
                 }
             },
-            Message::GtkTick => {
-                // Process pending GTK events for the tray icon
-                while gtk::events_pending() {
-                    gtk::main_iteration_do(false);
-                }
-                Task::none()
-            }
         }
     }
 
