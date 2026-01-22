@@ -65,4 +65,4 @@ The application starts with a window showing the current SMT status. Use the tog
 
 ## License
 
-MIT
+AGPL-3.0
