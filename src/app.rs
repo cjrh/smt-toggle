@@ -3,7 +3,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use iced::futures::Stream;
-use iced::widget::{button, column, container, row, text, toggler};
+use iced::widget::{column, container, text, toggler};
 use iced::{window, Element, Length, Size, Subscription, Task, Theme};
 
 use crate::smt::{self, SmtStatus};
@@ -119,7 +119,17 @@ impl App {
             }
             Message::WindowOpened(id) => {
                 self.window_id = Some(id);
-                Task::none()
+                // Immediately refresh status when window becomes visible
+                Task::perform(
+                    async {
+                        tokio::task::spawn_blocking(|| {
+                            smt::read_smt_status().unwrap_or(SmtStatus::Unknown)
+                        })
+                        .await
+                        .unwrap_or(SmtStatus::Unknown)
+                    },
+                    Message::SmtStatusUpdated,
+                )
             }
             Message::GtkTick => {
                 // Process pending GTK events for the tray icon
@@ -153,14 +163,18 @@ impl App {
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
-        Subscription::batch([
-            // Listen for window close events (window actually closed)
+        let mut subs = vec![
             window::close_events().map(Message::WindowClosed),
-            // Poll for GTK events every 100ms to keep the tray icon responsive
             iced::time::every(Duration::from_millis(100)).map(|_| Message::GtkTick),
-            // Listen for tray events
             tray_subscription(),
-        ])
+        ];
+
+        // Only poll SMT status when window is visible
+        if self.window_id.is_some() {
+            subs.push(iced::time::every(Duration::from_secs(3)).map(|_| Message::RefreshStatus));
+        }
+
+        Subscription::batch(subs)
     }
 
     pub fn view(&self, _window_id: window::Id) -> Element<'_, Message> {
@@ -193,9 +207,6 @@ impl App {
         if let Some(ref error) = self.error_message {
             content = content.push(text(format!("Error: {}", error)).size(12));
         }
-
-        let refresh_btn = button(text("Refresh")).on_press(Message::RefreshStatus);
-        content = content.push(row![refresh_btn].spacing(10));
 
         container(content)
             .width(Length::Fill)
