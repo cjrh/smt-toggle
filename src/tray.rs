@@ -67,11 +67,11 @@ fn create_default_icon() -> Result<Icon, Box<dyn std::error::Error>> {
             let idx = (y * size + x) * 4;
 
             // Main CPU body (centered square)
-            let in_body = x >= 8 && x < 24 && y >= 8 && y < 24;
+            let in_body = (8..24).contains(&x) && (8..24).contains(&y);
 
             // Pins on sides
-            let on_pin = (y >= 10 && y < 22 && (x < 8 || x >= 24) && (y % 3 != 0))
-                || (x >= 10 && x < 22 && (y < 8 || y >= 24) && (x % 3 != 0));
+            let on_pin = ((10..22).contains(&y) && !(8..24).contains(&x) && (y % 3 != 0))
+                || ((10..22).contains(&x) && !(8..24).contains(&y) && (x % 3 != 0));
 
             if in_body || on_pin {
                 // Light blue color for the icon

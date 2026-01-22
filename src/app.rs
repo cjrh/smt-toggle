@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use iced::futures::Stream;
 use iced::widget::{button, column, container, row, text, toggler};
-use iced::{event, window, Element, Event, Length, Size, Subscription, Task, Theme};
+use iced::{window, Element, Length, Size, Subscription, Task, Theme};
 
 use crate::smt::{self, SmtStatus};
 use crate::tray::TrayEvent;
@@ -22,37 +22,40 @@ pub enum Message {
     SmtStatusUpdated(SmtStatus),
     RefreshStatus,
     SetSmtResult(Result<(), String>),
-    WindowCloseRequested(window::Id),
+    WindowClosed(window::Id),
     TrayEvent(TrayEvent),
     GtkTick,
-    IcedEvent(Event),
+    WindowOpened(window::Id),
 }
 
 pub struct App {
     smt_status: SmtStatus,
     is_toggling: bool,
     error_message: Option<String>,
-    window_visible: bool,
-    main_window_id: Option<window::Id>,
+    window_id: Option<window::Id>,
 }
 
 impl App {
     pub fn new() -> (Self, Task<Message>) {
         let status = smt::read_smt_status().unwrap_or(SmtStatus::Unknown);
+
+        // Open the initial window
+        let (id, open_task) = window::open(window::Settings {
+            size: Size::new(300.0, 200.0),
+            resizable: false,
+            decorations: true,
+            ..Default::default()
+        });
+
         (
             Self {
                 smt_status: status,
                 is_toggling: false,
                 error_message: None,
-                window_visible: true,
-                main_window_id: None,
+                window_id: Some(id),
             },
-            Task::none(),
+            open_task.map(Message::WindowOpened),
         )
-    }
-
-    pub fn title(&self) -> String {
-        String::from("SMT Toggle")
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
@@ -107,23 +110,32 @@ impl App {
                 },
                 Message::SmtStatusUpdated,
             ),
-            Message::WindowCloseRequested(id) => {
-                // Store the window ID and minimize window instead of closing
-                eprintln!("Close requested for window {:?}", id);
-                self.main_window_id = Some(id);
-                self.window_visible = false;
-                window::minimize(id, true)
+            Message::WindowClosed(id) => {
+                // Window was closed, clear the ID
+                if self.window_id == Some(id) {
+                    self.window_id = None;
+                }
+                Task::none()
+            }
+            Message::WindowOpened(id) => {
+                self.window_id = Some(id);
+                Task::none()
             }
             Message::TrayEvent(tray_event) => match tray_event {
                 TrayEvent::ShowWindow => {
-                    self.window_visible = true;
-                    if let Some(id) = self.main_window_id {
-                        Task::batch([
-                            window::minimize(id, false),
-                            window::gain_focus(id),
-                        ])
+                    if let Some(id) = self.window_id {
+                        // Window exists, just focus it
+                        window::gain_focus(id)
                     } else {
-                        Task::none()
+                        // No window, open a new one
+                        let (id, open_task) = window::open(window::Settings {
+                            size: Size::new(300.0, 200.0),
+                            resizable: false,
+                            decorations: true,
+                            ..Default::default()
+                        });
+                        self.window_id = Some(id);
+                        open_task.map(Message::WindowOpened)
                     }
                 }
                 TrayEvent::Quit => {
@@ -137,31 +149,21 @@ impl App {
                 }
                 Task::none()
             }
-            Message::IcedEvent(evt) => {
-                // Handle window close request from general events
-                if let Event::Window(window::Event::CloseRequested) = evt {
-                    eprintln!("Close requested via IcedEvent!");
-                    // We'll handle this via the WindowCloseRequested message
-                }
-                Task::none()
-            }
         }
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
         Subscription::batch([
-            // Listen for window close requests (specific subscription)
-            window::close_requests().map(Message::WindowCloseRequested),
+            // Listen for window close events (window actually closed)
+            window::close_events().map(Message::WindowClosed),
             // Poll for GTK events every 100ms to keep the tray icon responsive
             iced::time::every(Duration::from_millis(100)).map(|_| Message::GtkTick),
             // Listen for tray events
             tray_subscription(),
-            // Listen for all events (fallback for close requests)
-            event::listen().map(Message::IcedEvent),
         ])
     }
 
-    pub fn view(&self) -> Element<'_, Message> {
+    pub fn view(&self, _window_id: window::Id) -> Element<'_, Message> {
         let status_text = match self.smt_status {
             SmtStatus::On => "SMT is ON (Hyperthreading enabled)",
             SmtStatus::Off => "SMT is OFF (Hyperthreading disabled)",
@@ -202,29 +204,14 @@ impl App {
             .into()
     }
 
-    pub fn theme(&self) -> Theme {
+    pub fn theme(&self, _window_id: window::Id) -> Theme {
         Theme::Dark
-    }
-
-    pub fn window_settings() -> window::Settings {
-        window::Settings {
-            size: Size::new(300.0, 200.0),
-            resizable: false,
-            decorations: true,
-            exit_on_close_request: false, // Don't exit, hide to tray instead
-            ..Default::default()
-        }
     }
 }
 
 /// Subscription that polls the tray event channel
 fn tray_subscription() -> Subscription<Message> {
-    struct TraySubscription;
-
-    Subscription::run_with_id(
-        std::any::TypeId::of::<TraySubscription>(),
-        tray_event_stream(),
-    )
+    Subscription::run(tray_event_stream)
 }
 
 fn tray_event_stream() -> impl Stream<Item = Message> {

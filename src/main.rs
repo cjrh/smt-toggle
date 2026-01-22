@@ -20,11 +20,10 @@ fn main() -> iced::Result {
     // Initialize the tray icon with the event sender
     let _tray = Tray::new(tray_sender).expect("Failed to create tray icon");
 
-    // Run the Iced application
-    iced::application(App::title, App::update, App::view)
+    // Run as a daemon - this won't exit when windows close
+    iced::daemon(App::new, App::update, App::view)
+        .title("SMT Toggle")
         .subscription(App::subscription)
         .theme(App::theme)
-        .window(App::window_settings())
-        .exit_on_close_request(false)
-        .run_with(App::new)
+        .run()
 }
