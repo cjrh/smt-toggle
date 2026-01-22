@@ -1,7 +1,20 @@
+use std::sync::mpsc;
+use std::sync::Mutex;
+use std::time::Duration;
+
+use iced::futures::Stream;
 use iced::widget::{button, column, container, row, text, toggler};
-use iced::{window, Element, Length, Size, Task, Theme};
+use iced::{event, window, Element, Event, Length, Size, Subscription, Task, Theme};
 
 use crate::smt::{self, SmtStatus};
+use crate::tray::TrayEvent;
+
+// Global channel receiver for tray events (set from main)
+static TRAY_RECEIVER: Mutex<Option<mpsc::Receiver<TrayEvent>>> = Mutex::new(None);
+
+pub fn set_tray_receiver(receiver: mpsc::Receiver<TrayEvent>) {
+    *TRAY_RECEIVER.lock().unwrap() = Some(receiver);
+}
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -9,12 +22,18 @@ pub enum Message {
     SmtStatusUpdated(SmtStatus),
     RefreshStatus,
     SetSmtResult(Result<(), String>),
+    WindowCloseRequested(window::Id),
+    TrayEvent(TrayEvent),
+    GtkTick,
+    IcedEvent(Event),
 }
 
 pub struct App {
     smt_status: SmtStatus,
     is_toggling: bool,
     error_message: Option<String>,
+    window_visible: bool,
+    main_window_id: Option<window::Id>,
 }
 
 impl App {
@@ -25,6 +44,8 @@ impl App {
                 smt_status: status,
                 is_toggling: false,
                 error_message: None,
+                window_visible: true,
+                main_window_id: None,
             },
             Task::none(),
         )
@@ -86,7 +107,58 @@ impl App {
                 },
                 Message::SmtStatusUpdated,
             ),
+            Message::WindowCloseRequested(id) => {
+                // Store the window ID and minimize window instead of closing
+                eprintln!("Close requested for window {:?}", id);
+                self.main_window_id = Some(id);
+                self.window_visible = false;
+                window::minimize(id, true)
+            }
+            Message::TrayEvent(tray_event) => match tray_event {
+                TrayEvent::ShowWindow => {
+                    self.window_visible = true;
+                    if let Some(id) = self.main_window_id {
+                        Task::batch([
+                            window::minimize(id, false),
+                            window::gain_focus(id),
+                        ])
+                    } else {
+                        Task::none()
+                    }
+                }
+                TrayEvent::Quit => {
+                    std::process::exit(0);
+                }
+            },
+            Message::GtkTick => {
+                // Process pending GTK events for the tray icon
+                while gtk::events_pending() {
+                    gtk::main_iteration_do(false);
+                }
+                Task::none()
+            }
+            Message::IcedEvent(evt) => {
+                // Handle window close request from general events
+                if let Event::Window(window::Event::CloseRequested) = evt {
+                    eprintln!("Close requested via IcedEvent!");
+                    // We'll handle this via the WindowCloseRequested message
+                }
+                Task::none()
+            }
         }
+    }
+
+    pub fn subscription(&self) -> Subscription<Message> {
+        Subscription::batch([
+            // Listen for window close requests (specific subscription)
+            window::close_requests().map(Message::WindowCloseRequested),
+            // Poll for GTK events every 100ms to keep the tray icon responsive
+            iced::time::every(Duration::from_millis(100)).map(|_| Message::GtkTick),
+            // Listen for tray events
+            tray_subscription(),
+            // Listen for all events (fallback for close requests)
+            event::listen().map(Message::IcedEvent),
+        ])
     }
 
     pub fn view(&self) -> Element<'_, Message> {
@@ -139,7 +211,40 @@ impl App {
             size: Size::new(300.0, 200.0),
             resizable: false,
             decorations: true,
+            exit_on_close_request: false, // Don't exit, hide to tray instead
             ..Default::default()
         }
     }
+}
+
+/// Subscription that polls the tray event channel
+fn tray_subscription() -> Subscription<Message> {
+    struct TraySubscription;
+
+    Subscription::run_with_id(
+        std::any::TypeId::of::<TraySubscription>(),
+        tray_event_stream(),
+    )
+}
+
+fn tray_event_stream() -> impl Stream<Item = Message> {
+    iced::futures::stream::unfold((), |()| async {
+        // Poll the tray receiver
+        loop {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+
+            let event = {
+                let receiver = TRAY_RECEIVER.lock().unwrap();
+                if let Some(ref rx) = *receiver {
+                    rx.try_recv().ok()
+                } else {
+                    None
+                }
+            };
+
+            if let Some(evt) = event {
+                return Some((Message::TrayEvent(evt), ()));
+            }
+        }
+    })
 }

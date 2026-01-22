@@ -1,20 +1,31 @@
+use std::sync::mpsc;
 use tray_icon::{
     menu::{Menu, MenuEvent, MenuItem},
     Icon, TrayIcon, TrayIconBuilder,
 };
+
+/// Events from the tray icon that the main app should handle
+#[derive(Debug, Clone)]
+pub enum TrayEvent {
+    ShowWindow,
+    Quit,
+}
 
 pub struct Tray {
     _tray_icon: TrayIcon,
 }
 
 impl Tray {
-    pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
-        // Create menu
+    pub fn new(event_sender: mpsc::Sender<TrayEvent>) -> Result<Self, Box<dyn std::error::Error>> {
+        // Create menu with Show and Quit options
         let menu = Menu::new();
+        let show_item = MenuItem::new("Show", true, None);
         let quit_item = MenuItem::new("Quit", true, None);
 
+        menu.append(&show_item)?;
         menu.append(&quit_item)?;
 
+        let show_id = show_item.id().clone();
         let quit_id = quit_item.id().clone();
 
         // Create icon from embedded data
@@ -26,12 +37,14 @@ impl Tray {
             .with_icon(icon)
             .build()?;
 
-        // Handle menu events
+        // Handle menu events in a separate thread
         std::thread::spawn(move || {
             loop {
                 if let Ok(event) = MenuEvent::receiver().recv() {
                     if event.id == quit_id {
-                        std::process::exit(0);
+                        let _ = event_sender.send(TrayEvent::Quit);
+                    } else if event.id == show_id {
+                        let _ = event_sender.send(TrayEvent::ShowWindow);
                     }
                 }
             }
