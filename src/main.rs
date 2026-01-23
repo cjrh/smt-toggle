@@ -49,7 +49,7 @@ fn main() -> iced::Result {
 
     // Run as a daemon - this won't exit when windows close
     iced::daemon(App::new, App::update, App::view)
-        .title("SMT Toggle")
+        .title("System Settings")
         .subscription(App::subscription)
         .theme(App::theme)
         .settings(iced::Settings {
