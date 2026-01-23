@@ -1,10 +1,10 @@
-use std::sync::mpsc;
 use std::sync::Mutex;
+use std::sync::mpsc;
 use std::time::Duration;
 
 use iced::futures::Stream;
 use iced::widget::{column, container, text, toggler};
-use iced::{window, Element, Length, Size, Subscription, Task, Theme};
+use iced::{Element, Length, Size, Subscription, Task, Theme, window};
 
 use crate::smt::{self, SmtStatus};
 use crate::tray::TrayEvent;
@@ -178,26 +178,33 @@ impl App {
     }
 
     pub fn view(&self, _window_id: window::Id) -> Element<'_, Message> {
-        let status_text = match self.smt_status {
-            SmtStatus::On => "SMT is ON (Hyperthreading enabled)",
-            SmtStatus::Off => "SMT is OFF (Hyperthreading disabled)",
-            SmtStatus::ForceOff => "SMT is Force OFF (disabled at boot)",
-            SmtStatus::NotSupported => "SMT is not supported on this system",
-            SmtStatus::Unknown => "SMT status unknown",
-        };
+        let mut content = column![].spacing(15);
 
-        let mut content = column![text(status_text).size(16),].spacing(15);
-
-        if self.smt_status.is_controllable() {
-            let toggle = toggler(self.smt_status.is_enabled())
-                .label(if self.smt_status.is_enabled() {
-                    "Enabled"
-                } else {
-                    "Disabled"
-                })
-                .on_toggle(Message::SmtToggled);
-
-            content = content.push(toggle);
+        // SMT setting
+        match self.smt_status {
+            SmtStatus::On | SmtStatus::Off => {
+                let label = format!(
+                    "SMT (Hyperthreading) - {}",
+                    if self.smt_status.is_enabled() {
+                        "On"
+                    } else {
+                        "Off"
+                    }
+                );
+                let toggle = toggler(self.smt_status.is_enabled())
+                    .label(label)
+                    .on_toggle(Message::SmtToggled);
+                content = content.push(toggle);
+            }
+            SmtStatus::ForceOff => {
+                content = content.push(text("SMT (Hyperthreading) - Disabled at boot").size(14));
+            }
+            SmtStatus::NotSupported => {
+                content = content.push(text("SMT (Hyperthreading) - Not supported").size(14));
+            }
+            SmtStatus::Unknown => {
+                content = content.push(text("SMT (Hyperthreading) - Unknown").size(14));
+            }
         }
 
         if self.is_toggling {

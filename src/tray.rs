@@ -1,7 +1,7 @@
 use std::sync::mpsc;
 use tray_icon::{
-    menu::{Menu, MenuEvent, MenuItem},
     Icon, TrayIcon, TrayIconBuilder,
+    menu::{Menu, MenuEvent, MenuItem},
 };
 
 /// Events from the tray icon that the main app should handle
@@ -33,7 +33,7 @@ impl Tray {
 
         let tray_icon = TrayIconBuilder::new()
             .with_menu(Box::new(menu))
-            .with_tooltip("SMT Toggle")
+            .with_tooltip("System Settings")
             .with_icon(icon)
             .build()?;
 
@@ -75,7 +75,7 @@ fn create_default_icon() -> Result<Icon, Box<dyn std::error::Error>> {
 
             if in_body || on_pin {
                 // Light blue color for the icon
-                rgba[idx] = 100;     // R
+                rgba[idx] = 100; // R
                 rgba[idx + 1] = 149; // G
                 rgba[idx + 2] = 237; // B
                 rgba[idx + 3] = 255; // A
